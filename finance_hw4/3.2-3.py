@@ -44,7 +44,32 @@ mom = mom[["UMD"]]
 mom = drop_dupes_sort(mom)
 
 ###############################################
-# 3. Load 10 Industry Portfolios
+# 3. Load HML Devil (USA) - ADDED SECTION
+###############################################
+dev = pd.read_excel(
+    "finance_hw4/The Devil in HMLs Details Factors Monthly.xlsx", sheet_name="HML Devil"
+)
+
+# USA column = column index 24 (based on 3.1.py logic)
+# Row 18 is where data usually starts in this AQR sheet
+hml_dev = dev.iloc[18:, [0, 24]].copy()
+hml_dev.columns = ["Date", "HML_DEV"]
+
+# Convert date
+hml_dev["Date"] = pd.to_datetime(hml_dev["Date"], errors="coerce")
+hml_dev = hml_dev.dropna(subset=["Date"])
+
+# Convert to decimal
+hml_dev["HML_DEV"] = pd.to_numeric(hml_dev["HML_DEV"], errors="coerce") / 100.0
+
+# Set index and align to monthly
+hml_dev = hml_dev.set_index("Date")
+hml_dev.index = hml_dev.index.to_period("M").to_timestamp()
+hml_dev = hml_dev.loc[hml_dev.index >= "1963-07-01"]
+hml_dev = drop_dupes_sort(hml_dev)
+
+###############################################
+# 4. Load 10 Industry Portfolios
 ###############################################
 lines_ind = open("finance_hw4/10_Industry_Portfolios.csv").read().splitlines()
 data_ind = [ln.strip() for ln in lines_ind if re.match(r"^\s*\d{6}", ln)]
@@ -79,7 +104,7 @@ ind10 = ind10.set_index("Date") / 100.0
 ind10 = drop_dupes_sort(ind10)
 
 ###############################################
-# 4. Load 25 Size–Book Portfolios
+# 5. Load 25 Size–Book Portfolios
 ###############################################
 lines25 = open("finance_hw4/Developed_25_Portfolios_ME_BE-ME.csv").read().splitlines()
 data25 = [ln.strip() for ln in lines25 if re.match(r"^\s*\d{6}", ln)]
@@ -105,18 +130,36 @@ p25 = drop_dupes_sort(p25)
 print("Loaded:")
 print("FF5:", ff5.shape)
 print("UMD:", mom.shape)
+print("HML_DEV:", hml_dev.shape)
 print("25 portfolios:", p25.shape)
 print("10 industries:", ind10.shape)
 
 ###############################################
-# 5. Factor matrices
+# 6. Factor matrices
 ###############################################
+# Model 1: Fama-French 5 Factors
 factors5 = ff5[["MKT", "SMB", "HML", "RMW", "CMA"]]
-factors6 = factors5.join(mom, how="inner")  # (FF5 + UMD)
+
+# Model 2: AQR Six-Factor Model
+# Definition: MKT, SMB, RMW, CMA (from FF), HML_DEV (from AQR), UMD (from FF)
+# 1. Start with FF components (excluding standard HML)
+factors_aqr_base = ff5[["MKT", "SMB", "RMW", "CMA"]]
+
+# 2. Join HML_DEV (Inner join to align dates)
+factors_aqr_base = factors_aqr_base.join(hml_dev, how="inner")
+
+# 3. Join Momentum (UMD)
+factors6 = factors_aqr_base.join(mom, how="inner")
+
+# Reorder columns for cleanliness
+factors6 = factors6[["MKT", "SMB", "HML_DEV", "RMW", "CMA", "UMD"]]
 
 ###############################################
-# 6. Excess returns
+# 7. Excess returns
 ###############################################
+# We need to intersect with factors5 to get the RF (Risk Free) rate
+# Since factors6 is a subset of dates usually, we'll align based on the specific regression later
+# But for calculating excess return, we need RF.
 common25 = p25.index.intersection(ff5.index)
 common10 = ind10.index.intersection(ff5.index)
 
@@ -125,7 +168,7 @@ ret10_excess = ind10.loc[common10].sub(ff5.loc[common10, "RF"], axis=0)
 
 
 ###############################################
-# 7. Regression helper
+# 8. Regression helper
 ###############################################
 def regress_all(R_df, F_df):
     idx = R_df.index.intersection(F_df.index)
@@ -143,7 +186,7 @@ def regress_all(R_df, F_df):
 
 
 ###############################################
-# 8. GRS Test
+# 9. GRS Test
 ###############################################
 def grs_test(returns_df, factors_df):
 
@@ -182,7 +225,7 @@ def grs_test(returns_df, factors_df):
 
 
 ###############################################
-# 9. Compute Alpha tables
+# 10. Compute Alpha tables
 ###############################################
 alpha25_ff5 = regress_all(ret25_excess, factors5)
 alpha25_6 = regress_all(ret25_excess, factors6)
@@ -196,7 +239,7 @@ alpha10_ff5.to_csv("finance_hw4/alpha10_ff5.csv")
 alpha10_6.to_csv("finance_hw4/alpha10_6.csv")
 
 ###############################################
-# 10. Run GRS
+# 11. Run GRS
 ###############################################
 idx25_5 = ret25_excess.index.intersection(factors5.index)
 idx25_6 = ret25_excess.index.intersection(factors6.index)
@@ -211,7 +254,7 @@ grs10_ff5, p10_ff5, _ = grs_test(ret10_excess.loc[idx10_5], factors5.loc[idx10_5
 grs10_6, p10_6, _ = grs_test(ret10_excess.loc[idx10_6], factors6.loc[idx10_6])
 
 ###############################################
-# 11. Print Final Summary
+# 12. Print Final Summary
 ###############################################
 print("========== 25 Portfolios ==========")
 print("FF5 GRS:", grs25_ff5, "p:", p25_ff5)
